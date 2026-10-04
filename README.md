@@ -10,8 +10,8 @@ Data: IBM's sample data for a fictional telecom company, 7,043 customers, of who
 
 | # | Finding | Evidence |
 |---|---|---|
-| 1 | **New month-to-month customers are the risk.** | 55% of them leave in their first 6 months, against 3% of two-year customers. Month-to-month customers account for **87%** of the monthly revenue lost to churn |
-| 2 | **A simple model is as good as fancy ones, and better calibrated.** | Logistic regression AUC 0.843, random forest 0.845, gradient boosting 0.840 (5-fold cross-validation). When logistic regression says 40%, about 40% leave |
+| 1 | **New month-to-month customers are the risk.** | 55% of month-to-month customers in their first 6 months had left, against 3% of two-year customers. Month-to-month customers account for **87%** of the monthly revenue lost to churn |
+| 2 | **A simple model is as good as fancy ones, and better calibrated.** | Logistic regression AUC 0.843, random forest 0.845, gradient boosting 0.840 (5-fold cross-validation). Logistic regression's predicted probabilities closely match the share who actually leave |
 | 3 | **Offering everyone the deal loses money.** | With a $60 offer that keeps 30% of would-be leavers: offer to all **−$122k**, the usual "risk above 50%" rule **+$85k** |
 | 4 | **Deciding by expected profit earns more.** | Target only customers where risk × chance the offer works × value of their bill > cost: **+$92k**, which is $7.2k more than the 50% rule (95% bootstrap interval $2.6k–$11.8k) |
 | 5 | **The 50% cut-off only works by luck.** | Across 30 combinations of offer cost and success rate, the expected-profit rule won every time, by up to $128k. The 50% rule lost money in 9 of them |
