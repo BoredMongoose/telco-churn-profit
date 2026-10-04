@@ -6,6 +6,16 @@ Data: IBM's sample data for a fictional telecom company, 7,043 customers, of who
 
 ![Who to target](images/04_who_to_target.png)
 
+<!-- business:start -->
+## Business impact
+
+- **Question:** Which customers should get a retention offer?
+- **Key finding:** Targeting by expected profit (churn risk × value of the customer's bill) beat the usual 'risk above 50%' rule in all 30 cost scenarios tested. Offering the deal to everyone loses money.
+- **Recommendation:** Send the offer to the 29% of customers whose expected profit is positive: almost all are on month-to-month fibre plans paying $70+ a month, and 57% of them did leave (against 26.5% overall).
+- **Estimated impact:** **+$92k** profit from one targeted campaign, against −$122k for offering it to everyone (simulated: $60 offer that keeps 30% of would-be leavers).
+- **Case study:** [boredmongoose.github.io/projects/churn.html](https://boredmongoose.github.io/projects/churn.html)
+<!-- business:end -->
+
 ## Short answer
 
 | # | Finding | Evidence |
@@ -74,12 +84,17 @@ Keeping a $100-a-month customer is therefore worth $720, and the offer pays off 
 - **Python** ([`src/churn.py`](src/churn.py)): scikit-learn pipelines (one-hot encoding, scaling, models), out-of-fold predictions, and the offer economics as small functions. These are covered by **6 unit tests** ([`tests/`](tests/test_churn.py)), which caught a wrong "perfect hindsight" baseline in my first draft.
 - **Analysis** in [`notebooks/churn_analysis.ipynb`](notebooks/churn_analysis.ipynb): models, calibration, permutation importance, the policy comparison with a bootstrap, the sensitivity grid and reason codes.
 
-```
+## Reproduce
+
+```bash
+pip install -r requirements.txt
 python src/fetch_data.py                # download the data
 python src/run_sql.py                   # build the SQL tables, run the data checks
 python -m unittest discover -s tests    # test the offer economics
 jupyter notebook notebooks/churn_analysis.ipynb
 ```
+
+Running the notebook rebuilds the charts and `data/output/retention_targets.csv`. The [live dashboard](https://boredmongoose.github.io/projects/retention-dashboard.html) is built on that file.
 
 ## Limitations
 
@@ -87,5 +102,14 @@ jupyter notebook notebooks/churn_analysis.ipynb
 - **The offer economics are assumptions.** A real campaign should measure the success rate with a holdout group (an A/B test) before scaling up.
 - **The data is a snapshot**, so it can't say *when* a customer will leave. A survival model on monthly data could time the offer.
 - **Profit is scored on out-of-fold predictions.** A fresh period of data would be a stricter test.
+
+<!-- next:start -->
+## Next steps
+
+1. Run the offer as an A/B test with a holdout group, to measure the real success rate before scaling it up.
+2. Score active customers every month and check that the risk ranking holds on new data.
+3. Model *when* customers leave (survival analysis), so the offer arrives before they decide.
+4. Replace the flat 12-month value with each customer's lifetime value.
+<!-- next:end -->
 
 *Data: [IBM Telco Customer Churn](https://github.com/IBM/telco-customer-churn-on-icp4d) sample dataset (Apache License 2.0). Not included in this repo; `src/fetch_data.py` downloads it.*

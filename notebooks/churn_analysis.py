@@ -324,7 +324,7 @@ by_feature = by_feature - by_feature.mean()
 def describe(row_index, feature):
     value = X.iloc[row_index][feature]
     if feature == "tenure":
-        return f"Tenure: {value} months"
+        return f"Tenure: {value} month{'' if value == 1 else 's'}"
     if feature == "MonthlyCharges":
         return f"Monthly bill: ${value:.0f}"
     if feature == "SeniorCitizen":
