@@ -1,0 +1,4 @@
+contract,customers,monthly_revenue,monthly_revenue_lost,pct_revenue_lost,share_of_all_lost_revenue
+Month-to-month,3875,257294.0,120847.0,47.0,86.9
+One year,1473,95817.0,14118.0,14.7,10.1
+Two year,1695,103006.0,4165.0,4.0,3.0

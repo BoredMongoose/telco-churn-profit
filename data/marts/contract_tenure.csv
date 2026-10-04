@@ -1,0 +1,20 @@
+contract,tenure_band,band_order,customers,churned,churn_rate_pct
+All contracts,All tenures,1,7043,1869,26.5
+Month-to-month,All tenures,1,3875,1655,42.7
+Month-to-month,0-6 months,1,1413,780,55.2
+Month-to-month,7-12 months,2,581,244,42.0
+Month-to-month,1-2 years,3,737,278,37.7
+Month-to-month,2-4 years,4,802,264,32.9
+Month-to-month,4-6 years,5,342,89,26.0
+One year,All tenures,1,1473,166,11.3
+One year,0-6 months,1,39,4,10.3
+One year,7-12 months,2,85,9,10.6
+One year,1-2 years,3,197,16,8.1
+One year,2-4 years,4,518,55,10.6
+One year,4-6 years,5,634,82,12.9
+Two year,0-6 months,1,29,0,0.0
+Two year,All tenures,1,1695,48,2.8
+Two year,7-12 months,2,39,0,0.0
+Two year,1-2 years,3,90,0,0.0
+Two year,2-4 years,4,274,6,2.2
+Two year,4-6 years,5,1263,42,3.3

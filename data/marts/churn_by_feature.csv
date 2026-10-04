@@ -1,0 +1,26 @@
+feature,value,customers,churn_rate_pct,avg_monthly_charges,index_vs_average
+Contract,Month-to-month,3875,42.7,66.4,161.0
+Contract,One year,1473,11.3,65.05,42.0
+Contract,Two year,1695,2.8,60.77,11.0
+Internet service,Fiber optic,3096,41.9,91.5,158.0
+Internet service,DSL,2421,19.0,58.1,71.0
+Internet service,No,1526,7.4,21.08,28.0
+Online security,No,3498,41.8,75.69,157.0
+Online security,Yes,2019,14.6,78.84,55.0
+Online security,No internet service,1526,7.4,21.08,28.0
+Paperless billing,Yes,4171,33.6,73.55,126.0
+Paperless billing,No,2872,16.3,51.99,62.0
+Payment method,Electronic check,2365,45.3,76.26,171.0
+Payment method,Mailed check,1612,19.1,43.92,72.0
+Payment method,Bank transfer (automatic),1544,16.7,67.19,63.0
+Payment method,Credit card (automatic),1522,15.2,66.51,57.0
+Senior citizen,Yes,1142,41.7,79.82,157.0
+Senior citizen,No,5901,23.6,61.85,89.0
+Tech support,No,3473,41.6,74.59,157.0
+Tech support,Yes,2044,15.2,80.68,57.0
+Tech support,No internet service,1526,7.4,21.08,28.0
+Tenure,0-6 months,1481,52.9,54.74,199.0
+Tenure,7-12 months,705,35.9,58.95,135.0
+Tenure,1-2 years,1024,28.7,61.36,108.0
+Tenure,2-4 years,1594,20.4,65.93,77.0
+Tenure,4-6 years,2239,9.5,73.95,36.0
