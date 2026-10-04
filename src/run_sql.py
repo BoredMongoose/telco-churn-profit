@@ -12,6 +12,7 @@ def main():
     os.chdir(ROOT)                      # SQL files use paths relative to the project root
     MARTS.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(ROOT / "data" / "telco.duckdb"))
+    con.execute("SET threads = 1")   # same order and sums every run, so re-running reproduces the marts exactly
     for sql_file in sorted((ROOT / "sql").glob("*.sql")):
         con.execute(sql_file.read_text(encoding="utf-8"))
         print("ran", sql_file.name)
