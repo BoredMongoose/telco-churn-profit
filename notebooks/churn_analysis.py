@@ -39,18 +39,33 @@ import duckdb
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import LinearSegmentedColormap
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score, roc_curve
 from sklearn.model_selection import train_test_split
 
 warnings.filterwarnings("ignore")
-ROOT = Path.cwd().parent if Path.cwd().name == "notebooks" else Path.cwd()
-sys.path.insert(0, str(ROOT / "src"))
-from churn import Offer, expected_profit, load, models, out_of_fold, policies  # noqa: E402
-from style import AQUA, BLUE, BLUE_LIGHT, GRID, INK, INK_2, NEUTRAL, ORANGE, ORANGE_LIGHT, SURFACE, VIOLET, save, titles  # noqa: E402
 
+# the notebook is in the notebooks/ folder, so the project folder is one level up
+ROOT = Path.cwd()
+if ROOT.name == "notebooks":
+    ROOT = ROOT.parent
+
+# src/churn.py has the data loading, the models and the offer maths (tested in tests/)
+sys.path.append(str(ROOT / "src"))
+from churn import Offer, expected_profit, load, models, out_of_fold, policies
+from style import AQUA, BLUE, BLUE_LIGHT, GRID, INK, INK_2, NEUTRAL, ORANGE, SURFACE, VIOLET, save, titles
+
+# src/run_sql.py builds the summary tables in this DuckDB database
 con = duckdb.connect(str(ROOT / "data" / "telco.duckdb"), read_only=True)
-sql = lambda q: con.sql(q).df()
+
+
+def run_sql(query):
+    """Run a SQL query on the database and return the result as a pandas DataFrame."""
+    return con.execute(query).df()
+
+
+# X = the customer columns the model uses, y = whether they left (1) or stayed (0), raw = the original table
 X, y, raw = load(ROOT / "data" / "raw" / "Telco-Customer-Churn.csv")
 pd.set_option("display.width", 200)
 
@@ -58,7 +73,7 @@ pd.set_option("display.width", 200)
 # ## 1. Data quality
 
 # %%
-sql("SELECT check_name, detail, passed FROM dq_results ORDER BY check_name")
+run_sql("SELECT check_name, detail, passed FROM dq_results ORDER BY check_name")
 
 # %% [markdown]
 # Clean, as sample data tends to be. The one gap: 11 customers have a blank total bill. All 11 joined this month
@@ -67,21 +82,30 @@ sql("SELECT check_name, detail, passed FROM dq_results ORDER BY check_name")
 # ## 2. Who leaves
 
 # %%
-ct = sql("SELECT * FROM mart_contract_tenure WHERE contract <> 'All contracts' AND tenure_band <> 'All tenures'")
-ct.pivot_table(index="contract", columns="tenure_band", values="churn_rate_pct")[
-    ["0-6 months", "7-12 months", "1-2 years", "2-4 years", "4-6 years"]]
+contract_tenure = run_sql("""
+    SELECT *
+    FROM mart_contract_tenure
+    WHERE contract <> 'All contracts' AND tenure_band <> 'All tenures'
+""")
+bands = ["0-6 months", "7-12 months", "1-2 years", "2-4 years", "4-6 years"]
+churn_table = contract_tenure.pivot_table(index="contract", columns="tenure_band", values="churn_rate_pct")
+churn_table[bands]
 
 # %%
-bands = ["0-6 months", "7-12 months", "1-2 years", "2-4 years", "4-6 years"]
+# Chart 1: churn rate by tenure, one bar per contract type
 contracts = ["Month-to-month", "One year", "Two year"]
-fig, ax = plt.subplots(figsize=(10.5, 5.2))
-w = 0.27
 colours = {"Month-to-month": ORANGE, "One year": BLUE, "Two year": AQUA}
-for j, c in enumerate(contracts):
-    sub = ct[ct.contract == c].set_index("tenure_band").reindex(bands)
-    bars = ax.bar(np.arange(5) + (j - 1) * w, sub.churn_rate_pct, width=w - 0.03, color=colours[c], label=c)
-    for b, v in zip(bars, sub.churn_rate_pct):
-        ax.text(b.get_x() + b.get_width() / 2, v + 1, f"{v:.0f}%", ha="center", fontsize=9, color=INK)
+bar_width = 0.27
+
+fig, ax = plt.subplots(figsize=(10.5, 5.2))
+for j, contract in enumerate(contracts):
+    rows = contract_tenure[contract_tenure["contract"] == contract]
+    rates = rows.set_index("tenure_band").reindex(bands)["churn_rate_pct"]
+    positions = np.arange(5) + (j - 1) * bar_width
+    bars = ax.bar(positions, rates, width=bar_width - 0.03, color=colours[contract], label=contract)
+    for bar, rate in zip(bars, rates):
+        ax.text(bar.get_x() + bar.get_width() / 2, rate + 1, f"{rate:.0f}%", ha="center", fontsize=9, color=INK)
+
 ax.set_xticks(np.arange(5), ["First 6 months", "7–12 months", "1–2 years", "2–4 years", "4–6 years"])
 ax.set_xlabel("How long the customer had been with the company")
 ax.set_ylabel("Share who left (%)")
@@ -94,10 +118,15 @@ save(fig, "01_who_leaves.png")
 plt.show()
 
 # %%
-sql("SELECT * FROM mart_revenue_at_risk")
+# monthly revenue lost to churn, by contract type
+run_sql("SELECT * FROM mart_revenue_at_risk")
 
 # %%
-sql("SELECT * FROM mart_churn_by_feature WHERE feature IN ('Payment method', 'Internet service', 'Tech support', 'Senior citizen')")
+run_sql("""
+    SELECT *
+    FROM mart_churn_by_feature
+    WHERE feature IN ('Payment method', 'Internet service', 'Tech support', 'Senior citizen')
+""")
 
 # %% [markdown]
 # Electronic-cheque payers (45%), fibre-optic customers (42%) and customers without tech support (42%) also leave
@@ -109,32 +138,59 @@ sql("SELECT * FROM mart_churn_by_feature WHERE feature IN ('Payment method', 'In
 # probability comes from a model that never saw them.
 
 # %%
-candidates = models()
-oof = {name: out_of_fold(m, X, y) for name, m in candidates.items()}
-scores = pd.DataFrame({name: {"ROC AUC": roc_auc_score(y, p), "Average precision": average_precision_score(y, p),
-                              "Brier score (lower is better)": brier_score_loss(y, p)} for name, p in oof.items()}).T
+candidates = models()   # logistic regression, random forest, gradient boosting
+
+# out-of-fold predictions: each customer is scored by a model trained on the other 80% of customers
+oof = {}
+for name, model in candidates.items():
+    oof[name] = out_of_fold(model, X, y)
+
+rows = []
+for name, predictions in oof.items():
+    rows.append({
+        "model": name,
+        "ROC AUC": roc_auc_score(y, predictions),
+        "Average precision": average_precision_score(y, predictions),
+        "Brier score (lower is better)": brier_score_loss(y, predictions),
+    })
+scores = pd.DataFrame(rows).set_index("model")
 scores.round(4)
 
 # %%
-p = oof["Logistic regression"]
-deciles = pd.DataFrame({"predicted": p, "actual": y}).groupby(pd.qcut(p, 10), observed=True).mean()
+# Chart 2: ROC curves (left) and calibration of the logistic regression (right)
+p = oof["Logistic regression"]     # the model I use from here on
+
+# calibration: split customers into 10 equal groups by predicted risk, and compare predicted vs actual churn
+calibration = pd.DataFrame({"predicted": p, "actual": y})
+calibration["tenth"] = pd.qcut(calibration["predicted"], 10)
+deciles = calibration.groupby("tenth", observed=True).mean()
+
 fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
 ax = axes[0]
-for (name, probs), colour in zip(oof.items(), [BLUE, NEUTRAL, VIOLET]):
-    fpr, tpr, _ = roc_curve(y, probs)
-    ax.plot(fpr, tpr, color=colour, lw=2.2 if name == "Logistic regression" else 1.6,
-            label=f"{name} (AUC {roc_auc_score(y, probs):.3f})")
+model_colours = {"Logistic regression": BLUE, "Random forest": NEUTRAL, "Gradient boosting": VIOLET}
+for name, predictions in oof.items():
+    false_positive_rate, true_positive_rate, _ = roc_curve(y, predictions)
+    auc = roc_auc_score(y, predictions)
+    if name == "Logistic regression":
+        line_width = 2.2
+    else:
+        line_width = 1.6
+    ax.plot(false_positive_rate, true_positive_rate, color=model_colours[name], lw=line_width,
+            label=f"{name} (AUC {auc:.3f})")
 ax.plot([0, 1], [0, 1], color=GRID, lw=1, ls="--")
 ax.set_xlabel("Share of stayers wrongly flagged")
 ax.set_ylabel("Share of leavers caught")
 ax.set_title("Same accuracy", fontsize=12, pad=8)
 ax.legend(loc="lower right", fontsize=9.3)
+
 ax = axes[1]
 ax.plot([0, 0.85], [0, 0.85], color=GRID, lw=1, ls="--")
-ax.plot(deciles.predicted, deciles.actual, color=BLUE, marker="o", lw=2)
+ax.plot(deciles["predicted"], deciles["actual"], color=BLUE, marker="o", lw=2)
 ax.set_xlabel("Predicted chance of leaving (average of each tenth)")
 ax.set_ylabel("Share who actually left")
 ax.set_title("Logistic regression's probabilities are honest", fontsize=12, pad=8)
+
 fig.suptitle("Three models, the same accuracy: the simplest one is well calibrated", x=0.01, ha="left",
              fontsize=15, fontweight="bold", y=1.04)
 fig.tight_layout()
@@ -150,22 +206,34 @@ plt.show()
 # measure how much the AUC drops.
 
 # %%
-X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.25, stratify=y, random_state=42)
-lr = models()["Logistic regression"].fit(X_tr, y_tr)
-imp = permutation_importance(lr, X_te, y_te, scoring="roc_auc", n_repeats=30, random_state=0)
-importance = pd.Series(imp.importances_mean, index=X.columns).sort_values(ascending=False)
+# train on 75% of customers, then shuffle each column on the other 25% and see how much the AUC drops
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, stratify=y, random_state=42)
+logistic = models()["Logistic regression"].fit(X_train, y_train)
+result = permutation_importance(logistic, X_test, y_test, scoring="roc_auc", n_repeats=30, random_state=0)
+importance = pd.Series(result.importances_mean, index=X.columns).sort_values(ascending=False)
 importance.head(10).round(4)
 
 # %%
-top = importance.head(8)[::-1]
+# Chart 3: the 8 most important columns
 labels = {"tenure": "Tenure (months)", "Contract": "Contract type", "InternetService": "Internet service",
           "MonthlyCharges": "Monthly bill", "TotalCharges": "Total billed", "PaymentMethod": "Payment method",
           "TechSupport": "Tech support", "OnlineSecurity": "Online security", "PaperlessBilling": "Paperless billing",
           "StreamingMovies": "Streaming movies", "StreamingTV": "Streaming TV", "MultipleLines": "Multiple lines"}
+
+top = importance.head(8)
+top = top.sort_values()     # smallest first, so the biggest bar ends up at the top of the chart
+
+bar_names = []
+for column in top.index:
+    if column in labels:
+        bar_names.append(labels[column])
+    else:
+        bar_names.append(column)
+
 fig, ax = plt.subplots(figsize=(9, 4.8))
-ax.barh([labels.get(i, i) for i in top.index], top.values, color=BLUE, height=0.6)
-for yv, v in enumerate(top.values):
-    ax.text(v + 0.0006, yv, f"{v:.3f}", va="center", fontsize=9.5, color=INK)
+ax.barh(bar_names, top.values, color=BLUE, height=0.6)
+for i, value in enumerate(top.values):
+    ax.text(value + 0.0006, i, f"{value:.3f}", va="center", fontsize=9.5, color=INK)
 ax.grid(axis="y", visible=False)
 ax.tick_params(axis="y", length=0)
 ax.set_xlabel("Drop in AUC when the column is shuffled")
@@ -187,16 +255,20 @@ plt.show()
 # would have to be above 93%. **Who's worth targeting depends on the bill, not just the risk.**
 
 # %%
-offer = Offer()
-bills = X.MonthlyCharges.values
-ev = expected_profit(p, bills, offer)
+# Chart 4: every customer by bill and risk; orange = the offer is expected to make money
+offer = Offer()     # $60, keeps 30% of would-be leavers, 12 months at a 60% margin
+bills = X["MonthlyCharges"].values
+ev = expected_profit(p, bills, offer)    # expected profit of sending each customer the offer
 target = ev > 0
+
+# the break-even line: the risk at which the offer exactly pays for itself, for each bill
+line_bills = np.linspace(20, 120, 200)
+break_even_risk = offer.cost / (offer.success_rate * offer.value_if_saved(line_bills))
 
 fig, ax = plt.subplots(figsize=(10.5, 5.6))
 ax.scatter(bills[~target], p[~target], s=7, color=NEUTRAL, alpha=0.5, lw=0, label="Don't send")
 ax.scatter(bills[target], p[target], s=7, color=ORANGE, alpha=0.6, lw=0, label="Send the offer")
-xs = np.linspace(20, 120, 200)
-ax.plot(xs, offer.cost / (offer.success_rate * offer.value_if_saved(xs)), color=INK, lw=1.6)
+ax.plot(line_bills, break_even_risk, color=INK, lw=1.6)
 ax.plot([18, 120], [0.5, 0.5], color=INK_2, lw=1.2, ls=(0, (4, 3)))
 ax.text(119, 0.52, "the usual 50% cut-off", ha="right", fontsize=9.5, color=INK_2,
         bbox=dict(fc=SURFACE, ec="none", pad=1.5))
@@ -206,9 +278,11 @@ ax.set_xlim(17, 121)
 ax.set_xlabel("Monthly bill ($)")
 ax.set_ylabel("Predicted chance of leaving")
 ax.legend(loc="upper right", markerscale=3, fontsize=9.5)
+n_target = target.sum()
+share_target = target.mean()
 titles(ax, "Who's worth an offer depends on their bill, not just their risk",
        f"Each dot is a customer. Orange: expected profit of a $60 offer is positive "
-       f"({target.sum():,} customers, {target.mean():.0%})")
+       f"({n_target:,} customers, {share_target:.0%})")
 save(fig, "04_who_to_target.png")
 plt.show()
 
@@ -218,30 +292,50 @@ plt.show()
 
 # %%
 table = policies(p, y, bills, offer)
-table["profit per 1,000 customers"] = table.profit / len(y) * 1000
+table["profit per 1,000 customers"] = table["profit"] / len(y) * 1000
 table.round(2)
 
 # %%
+# bootstrap: resample the customers 2,000 times to see how sure we can be that the profit rule earns more
 rng = np.random.default_rng(0)
 gaps = []
 for _ in range(2000):
-    i = rng.integers(0, len(y), len(y))
-    t = policies(p[i], y.values[i], bills[i], offer)
-    gaps.append(t.loc["Expected profit above zero", "profit"] - t.loc["Risk above 50% (default classifier)", "profit"])
-lo, hi = np.percentile(gaps, [2.5, 97.5])
-print(f"extra profit from the expected-profit rule: ${np.mean(gaps):,.0f} (95% bootstrap interval ${lo:,.0f} to ${hi:,.0f})")
+    sample = rng.integers(0, len(y), len(y))     # customer row numbers, drawn with replacement
+    result = policies(p[sample], y.values[sample], bills[sample], offer)
+    profit_rule = result.loc["Expected profit above zero", "profit"]
+    fifty_rule = result.loc["Risk above 50% (default classifier)", "profit"]
+    gaps.append(profit_rule - fifty_rule)
+
+low, high = np.percentile(gaps, [2.5, 97.5])
+print(f"extra profit from the expected-profit rule: ${np.mean(gaps):,.0f} "
+      f"(95% bootstrap interval ${low:,.0f} to ${high:,.0f})")
 
 # %%
-order = ["Everybody", "Risk above 50% (default classifier)", "Expected profit above zero", "Perfect hindsight"]
-show = table.loc[order]
+# Chart 5: profit of each targeting rule (drawn bottom to top)
+rules = ["Perfect hindsight", "Expected profit above zero", "Risk above 50% (default classifier)", "Everybody"]
+bar_labels = ["Perfect hindsight\n(the ceiling)", "Expected profit above zero", "Risk above 50%\n(default classifier)",
+              "Offer to everyone"]
+bar_colours = [GRID, BLUE, BLUE_LIGHT, NEUTRAL]
+profits = table.loc[rules, "profit"].values
+shares = table.loc[rules, "share_targeted"].values
+
 fig, ax = plt.subplots(figsize=(10, 4.8))
-colours = [NEUTRAL, BLUE_LIGHT, BLUE, GRID]
-bars = ax.barh(["Offer to everyone", "Risk above 50%\n(default classifier)", "Expected profit above zero",
-                "Perfect hindsight\n(the ceiling)"][::-1], show.profit.values[::-1] / 1000, color=colours[::-1], height=0.6)
-for b, v, share, rule in zip(bars, show.profit.values[::-1], show.share_targeted.values[::-1], order[::-1]):
-    money = f"{'+' if v >= 0 else '−'}${abs(v) / 1000:,.0f}k"
-    ax.text(max(v / 1000, 0) + 4, b.get_y() + b.get_height() / 2, f"{money}   ({share:.0%} targeted)",
-            va="center", ha="left", fontsize=10, color=INK, fontweight="bold" if rule.startswith("Expected") else "normal")
+bars = ax.barh(bar_labels, profits / 1000, color=bar_colours, height=0.6)
+for i in range(len(rules)):
+    profit = profits[i]
+    if profit >= 0:
+        money = f"+${profit / 1000:,.0f}k"
+    else:
+        money = f"−${abs(profit) / 1000:,.0f}k"
+    if rules[i] == "Expected profit above zero":
+        weight = "bold"
+    else:
+        weight = "normal"
+    bar = bars[i]
+    x_position = max(profit / 1000, 0) + 4      # just right of the bar (or of zero, for losses)
+    ax.text(x_position, bar.get_y() + bar.get_height() / 2, f"{money}   ({shares[i]:.0%} targeted)",
+            va="center", ha="left", fontsize=10, color=INK, fontweight=weight)
+
 ax.axvline(0, color=INK, lw=1)
 ax.set_xlim(-190, 260)
 ax.grid(axis="y", visible=False)
@@ -261,38 +355,50 @@ plt.show()
 rows = []
 for cost in [20, 40, 60, 80, 100, 120]:
     for rate in [0.1, 0.2, 0.3, 0.4, 0.5]:
-        t = policies(p, y, bills, Offer(cost=cost, success_rate=rate))
-        rows.append({"offer cost": cost, "success rate": rate,
-                     "expected-profit rule": t.loc["Expected profit above zero", "profit"],
-                     "50% rule": t.loc["Risk above 50% (default classifier)", "profit"],
-                     "share targeted by profit rule": t.loc["Expected profit above zero", "share_targeted"]})
+        result = policies(p, y, bills, Offer(cost=cost, success_rate=rate))
+        rows.append({
+            "offer cost": cost,
+            "success rate": rate,
+            "expected-profit rule": result.loc["Expected profit above zero", "profit"],
+            "50% rule": result.loc["Risk above 50% (default classifier)", "profit"],
+            "share targeted by profit rule": result.loc["Expected profit above zero", "share_targeted"],
+        })
 sens = pd.DataFrame(rows)
 sens["extra profit"] = sens["expected-profit rule"] - sens["50% rule"]
-print(f"the expected-profit rule wins in {(sens['extra profit'] > 0).sum()} of {len(sens)} scenarios; "
-      f"the 50% rule loses money in {(sens['50% rule'] < 0).sum()}")
+
+wins = (sens["extra profit"] > 0).sum()
+fifty_loses = (sens["50% rule"] < 0).sum()
+print(f"the expected-profit rule wins in {wins} of {len(sens)} scenarios; the 50% rule loses money in {fifty_loses}")
 sens.round(2)
 
 # %%
+# Chart 6: extra profit of the expected-profit rule for each cost / success-rate combination
 grid = sens.pivot_table(index="offer cost", columns="success rate", values="extra profit") / 1000
 share = sens.pivot_table(index="offer cost", columns="success rate", values="share targeted by profit rule")
+
 fig, ax = plt.subplots(figsize=(9.5, 5.4))
-from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
-cmap = LinearSegmentedColormap.from_list("b", ["#f4f8fd", BLUE_LIGHT, "#5b9be3", BLUE])
-im = ax.imshow(grid.values, cmap=cmap, aspect="auto", vmin=0)
+blues = LinearSegmentedColormap.from_list("b", ["#f4f8fd", BLUE_LIGHT, "#5b9be3", BLUE])
+ax.imshow(grid.values, cmap=blues, aspect="auto", vmin=0)
 for i in range(grid.shape[0]):
     for j in range(grid.shape[1]):
-        v = grid.values[i, j]
-        ax.text(j, i - 0.12, f"+${v:,.0f}k", ha="center", va="center", fontsize=10,
-                color=SURFACE if v > 60 else INK, fontweight="bold")
+        value = grid.values[i, j]
+        # white text on the dark cells, dark text on the light ones
+        if value > 60:
+            main_colour, small_colour = SURFACE, SURFACE
+        else:
+            main_colour, small_colour = INK, INK_2
+        ax.text(j, i - 0.12, f"+${value:,.0f}k", ha="center", va="center", fontsize=10, color=main_colour,
+                fontweight="bold")
         ax.text(j, i + 0.22, f"targets {share.values[i, j]:.0%}", ha="center", va="center", fontsize=8.3,
-                color=SURFACE if v > 60 else INK_2)
-ax.set_xticks(range(grid.shape[1]), [f"{c:.0%}" for c in grid.columns])
-ax.set_yticks(range(grid.shape[0]), [f"${r}" for r in grid.index])
+                color=small_colour)
+
+ax.set_xticks(range(grid.shape[1]), [f"{rate:.0%}" for rate in grid.columns])
+ax.set_yticks(range(grid.shape[0]), [f"${cost}" for cost in grid.index])
 ax.set_xlabel("Share of would-be leavers the offer keeps")
 ax.set_ylabel("Cost of the offer")
 ax.grid(False)
-for s in ax.spines.values():
-    s.set_visible(False)
+for spine in ax.spines.values():
+    spine.set_visible(False)
 titles(ax, "Deciding by expected profit wins in every scenario",
        "Extra profit from the expected-profit rule over the 50% rule, across 7,043 customers, "
        "and the share of customers it targets")
@@ -310,43 +416,82 @@ plt.show()
 # average customer, using the logistic regression's coefficients.
 
 # %%
+# fit the logistic regression on all customers
 final = models()["Logistic regression"].fit(X, y)
-prep, model = final.named_steps["prep"], final.named_steps["model"]
+prep = final.named_steps["prep"]      # the one-hot encoding and scaling step
+model = final.named_steps["model"]    # the logistic regression itself
+
+# each customer's prepared columns x the model's coefficients = how much each column adds to their risk score
 Z = prep.transform(X)
-Z = Z.toarray() if hasattr(Z, "toarray") else Z
-contrib = Z * model.coef_[0]
-names = prep.get_feature_names_out()
-source = [n.split("__", 1)[1].rsplit("_", 1)[0] if n.startswith("cat__") else n.split("__", 1)[1] for n in names]
-by_feature = pd.DataFrame(contrib, columns=names).T.groupby(source).sum().T
+if hasattr(Z, "toarray"):    # the encoder can return a sparse matrix
+    Z = Z.toarray()
+contributions = Z * model.coef_[0]
+
+# the encoder splits each column into several (e.g. "cat__Contract_Two year"); map them back to the original column
+encoded_names = prep.get_feature_names_out()
+
+
+def original_column(encoded_name):
+    """'cat__Contract_Two year' -> 'Contract', 'num__tenure' -> 'tenure'."""
+    name = encoded_name.split("__", 1)[1]
+    if encoded_name.startswith("cat__"):
+        name = name.rsplit("_", 1)[0]
+    return name
+
+
+columns = [original_column(name) for name in encoded_names]
+
+# add up the pieces of each original column, then compare each customer with the average customer
+by_feature = pd.DataFrame(contributions, columns=encoded_names).T.groupby(columns).sum().T
 by_feature = by_feature - by_feature.mean()
 
 
-def describe(row_index, feature):
-    value = X.iloc[row_index][feature]
-    if feature == "tenure":
-        return f"Tenure: {value} month{'' if value == 1 else 's'}"
-    if feature == "MonthlyCharges":
+def describe(row_number, column):
+    """Turn a column and a customer's value into a readable reason, like 'Tenure: 3 months'."""
+    value = X.iloc[row_number][column]
+    if column == "tenure":
+        if value == 1:
+            return "Tenure: 1 month"
+        return f"Tenure: {value} months"
+    if column == "MonthlyCharges":
         return f"Monthly bill: ${value:.0f}"
-    if feature == "SeniorCitizen":
-        return "Senior citizen" if value == 1 else "Not a senior"
-    return f"{labels.get(feature, feature)}: {value}"
+    if column == "SeniorCitizen":
+        if value == 1:
+            return "Senior citizen"
+        return "Not a senior"
+    if column in labels:
+        return f"{labels[column]}: {value}"
+    return f"{column}: {value}"
 
 
-top2 = np.argsort(-by_feature.values, axis=1)[:, :2]
-reason_1 = [describe(i, by_feature.columns[j[0]]) for i, j in enumerate(top2)]
-reason_2 = [describe(i, by_feature.columns[j[1]]) for i, j in enumerate(top2)]
+# for each customer, the two columns that push their risk up the most
+order = np.argsort(-by_feature.values, axis=1)    # column numbers, biggest contribution first
+reason_1 = []
+reason_2 = []
+for i in range(len(by_feature)):
+    reason_1.append(describe(i, by_feature.columns[order[i, 0]]))
+    reason_2.append(describe(i, by_feature.columns[order[i, 1]]))
 
-out = pd.DataFrame({"customer_id": raw.customerID, "churn_probability": p.round(3),
-                    "monthly_bill": bills, "expected_profit_of_offer": ev.round(2),
-                    "decision": np.where(ev > 0, "send offer", "no offer"),
-                    "main_reason": reason_1, "second_reason": reason_2})
+out = pd.DataFrame({
+    "customer_id": raw["customerID"],
+    "churn_probability": p.round(4),   # 4 decimals, so the dashboard's maths matches this notebook's
+    "monthly_bill": bills,
+    "expected_profit_of_offer": ev.round(2),
+    "decision": np.where(ev > 0, "send offer", "no offer"),
+    "main_reason": reason_1,
+    "second_reason": reason_2,
+})
 out = out.sort_values("expected_profit_of_offer", ascending=False)
+
 (ROOT / "data" / "output").mkdir(parents=True, exist_ok=True)
 out.to_csv(ROOT / "data" / "output" / "retention_targets.csv", index=False)
 out.head(10)
 
 # %%
-out[out.decision == "send offer"].main_reason.str.split(":").str[0].value_counts()
+# the most common main reason among the customers worth an offer
+send = out[out["decision"] == "send offer"]
+reason_type = send["main_reason"].str.split(":").str[0]    # "Tenure: 3 months" -> "Tenure"
+reason_type.value_counts()
 
 # %% [markdown]
 # ## 7. Limitations

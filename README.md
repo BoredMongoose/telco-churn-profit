@@ -10,7 +10,7 @@ Data: IBM's sample data for a fictional telecom company, 7,043 customers, of who
 ## Business impact
 
 - **Question:** Which customers should get a retention offer?
-- **Key finding:** Targeting by expected profit (churn risk × value of the customer's bill) beat the usual 'risk above 50%' rule in all 30 cost scenarios tested. Offering the deal to everyone loses money.
+- **Key finding:** Only the 29% where the offer pays for itself (churn risk × the customer's bill). That beat the usual 'risk above 50%' rule in all 30 cost scenarios tested, and offering it to everyone loses money.
 - **Recommendation:** Send the offer to the 29% of customers whose expected profit is positive: almost all are on month-to-month fibre plans paying $70+ a month, and 57% of them did leave (against 26.5% overall).
 - **Estimated impact:** **+$92k** profit from one targeted campaign, against −$122k for offering it to everyone (simulated: $60 offer that keeps 30% of would-be leavers).
 - **Case study:** [boredmongoose.github.io/projects/churn.html](https://boredmongoose.github.io/projects/churn.html)
